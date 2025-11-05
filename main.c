@@ -138,104 +138,90 @@ void display_bargraph(uint16_t adc_value) {
     Disp2String(line); // Send the full line to UART
 }
 
+// IOCheck function --> move out later
+void IOCheck(void) {
+    uint16_t adc_value;
+    
+    // ---- Handle PB1 presses ----
+    if (pb1_event) {
+        pb1_event = 0;
+        
+        if (current_mode == MODE_0_BARGRAPH) {
+            current_mode = MODE_1_STREAM;
+            mode_changed = 1;
+        } else {
+            if (stream_started == 0) {
+                pb1_pressed_in_mode1 = 1;
+            } else {
+                current_mode = MODE_0_BARGRAPH;
+                mode_changed = 1;
+            }
+        }
+    }
+
+    // ---- Handle mode transition ----
+    if (mode_changed) {
+        mode_changed = 0;
+        stream_started = 0;
+        pb1_pressed_in_mode1 = 0;
+        
+        if (current_mode == MODE_0_BARGRAPH) {
+            Disp2String("\r\n\n*** MODE 0: Bar Graph Display ***\r\n");
+        } else {
+            Disp2String("\r\n\n*** MODE 1: Data Streaming ***\r\n");
+            Disp2String("Press PB1 to START data stream...\r\n");
+        }
+    }
+
+    // ---- Mode 0: Bar Graph Logic ----
+    if (current_mode == MODE_0_BARGRAPH) {
+        if (timer_flag) {
+            timer_flag = 0;
+            adc_value = do_ADC();
+            display_bargraph(adc_value);
+        }
+    }
+
+    // ---- Mode 1: Streaming Logic ----
+    else if (current_mode == MODE_1_STREAM) {
+        if (!stream_started && pb1_pressed_in_mode1) {
+            pb1_pressed_in_mode1 = 0;
+            stream_started = 1;
+            Disp2String("STREAMING_START\r\n");
+        }
+        
+        if (stream_started) {
+            adc_value = do_ADC();
+            char buf[20];
+            sprintf(buf, "%u\r\n", adc_value);
+            Disp2String(buf);
+            delay_ms(100);
+        }
+    }
+}
+
 // ========== MAIN ==========
 
 int main(void) {
-    uint16_t adc_value;
-    uint8_t stream_started = 0; // Flag for Mode 1 streaming
-    uint8_t pb1_pressed_in_mode1 = 0; // Separate flag for Mode 1 start
-
     // --- System Initialization ---
     newClk(500); // 500 kHz clock
     
     // --- Analog setup (AN12/RB15) ---
-    // This is the FIX for the assignment
-    AD1PCFG = 0xFFFF;           // All pins digital by default
-    AD1PCFGbits.PCFG12 = 0;     // Set AN12 (RB15 / Pin 15) as analog input
+    AD1PCFG = 0xFFFF;
+    AD1PCFGbits.PCFG12 = 0;
     
-    IOinit();       // Init I/O and CN for PB1
-    InitUART2();    // Init UART
-    init_ADC();     // Init ADC module
-    setup_timer1(); // Init 1Hz timer
+    IOinit();
+    InitUART2();
+    init_ADC();
+    setup_timer1();
    
-    delay_ms(10); // Wait for everything to stabilize
+    delay_ms(10);
     Disp2String("\r\n*** MODE 0: Bar Graph Display ***\r\n");
 
     while (1) {
-
-        // ---- Handle PB1 presses (debounce) ----
-        if (pb1_event) {
-            pb1_event = 0;  // Clear the ISR flag
-            delay_ms(50);   // Debounce delay
-            
-            // Check if button is still pressed
-            if (PORTBbits.RB7 == 0) { 
-                // Wait for button release
-                while (PORTBbits.RB7 == 0); 
-                delay_ms(50); // Debounce delay
-                
-                // Now process the button press
-                if (current_mode == MODE_0_BARGRAPH) {
-                    current_mode = MODE_1_STREAM;
-                    mode_changed = 1;
-                } else {
-                    // In Mode 1, the first press toggles the mode,
-                    // but the *next* press will start the stream.
-                    if (stream_started == 0) {
-                        pb1_pressed_in_mode1 = 1; // Signal to start stream
-                    } else {
-                        // If already streaming, pressing again switches back to Mode 0
-                        current_mode = MODE_0_BARGRAPH;
-                        mode_changed = 1;
-                    }
-                }
-            }
-        }
-
-        // ---- Handle mode transition ----
-        if (mode_changed) {
-            mode_changed = 0;       // Clear the flag
-            stream_started = 0;     // Stop streaming on any mode change
-            pb1_pressed_in_mode1 = 0; // Reset stream start flag
-            
-            if (current_mode == MODE_0_BARGRAPH) {
-                Disp2String("\r\n\n*** MODE 0: Bar Graph Display ***\r\n");
-            } else {
-                Disp2String("\r\n\n*** MODE 1: Data Streaming ***\r\n");
-                Disp2String("Press PB1 to START data stream...\r\n");
-            }
-        }
-
-        // ---- Mode 0: Bar Graph Logic ----
-        if (current_mode == MODE_0_BARGRAPH) {
-            if (timer_flag) {
-                timer_flag = 0; // Clear the 1Hz flag
-                adc_value = do_ADC();
-                display_bargraph(adc_value);
-            }
-        }
-
-        // ---- Mode 1: Streaming Logic ----
-        else if (current_mode == MODE_1_STREAM) {
-            // Check if we got the signal to start
-            if (!stream_started && pb1_pressed_in_mode1) {
-                pb1_pressed_in_mode1 = 0; // Clear the flag
-                stream_started = 1;
-                Disp2String("STREAMING_START\r\n"); // Send sync message
-            }
-            
-            // If streaming, send data
-            if (stream_started) {
-                adc_value = do_ADC();
-                char buf[20];
-                // Send value as a simple string followed by newline
-                sprintf(buf, "%u\r\n", adc_value); 
-                Disp2String(buf);
-                delay_ms(100); // Stream at ~10 Hz
-            }
-        }
-
-        Idle(); // Enter idle mode to save power, will wake on interrupt
+        Idle();      // Sleep until interrupt wakes us
+        delay_ms(50);  // Handle debouncing if button pressed
+        IOCheck();   // Process all pending events
     }
 
     return 0;
