@@ -139,31 +139,43 @@ void display_bargraph(uint16_t adc_value) {
 }
 
 // IOCheck function --> move out later
+// IOCheck function (FINAL VERSION)
 void IOCheck(void) {
+    // Retains state between calls. Needs to be static.
+    static uint8_t stream_started = 0; 
     uint16_t adc_value;
     
-    // ---- Handle PB1 presses ----
+    // ---- Handle PB1 presses (State TOGGLE logic) ----
     if (pb1_event) {
-        pb1_event = 0;
+        pb1_event = 0; // Consume the event immediately
         
         if (current_mode == MODE_0_BARGRAPH) {
+            // Mode 0 -> Mode 1 (Always changes mode)
             current_mode = MODE_1_STREAM;
             mode_changed = 1;
-        } else {
+        } 
+        else { // current_mode == MODE_1_STREAM
+            // Mode 1: Pressing PB1 toggles the streaming state
             if (stream_started == 0) {
-                pb1_pressed_in_mode1 = 1;
+                // Not streaming: Start streaming
+                stream_started = 1;
+                Disp2String("STREAMING_START\r\n"); // <--- Print START here
             } else {
+                // Already streaming: Stop stream and return to Mode 0
+                stream_started = 0; // Explicitly stop streaming
                 current_mode = MODE_0_BARGRAPH;
                 mode_changed = 1;
+                Disp2String("STREAMING_STOP\r\n"); // Optional: Add a stop message
             }
         }
     }
 
-    // ---- Handle mode transition ----
+    // --- Handle Mode Transition (Prints only, no logic) ---
     if (mode_changed) {
         mode_changed = 0;
-        stream_started = 0;
-        pb1_pressed_in_mode1 = 0;
+        // Crucial: Reset stream_started on mode change (if it wasn't done above)
+        // In the new logic, it's done when we transition out of mode 1.
+        stream_started = 0; 
         
         if (current_mode == MODE_0_BARGRAPH) {
             Disp2String("\r\n\n*** MODE 0: Bar Graph Display ***\r\n");
@@ -182,27 +194,23 @@ void IOCheck(void) {
         }
     }
 
-    // ---- Mode 1: Streaming Logic ----
+    // ---- Mode 1: Streaming Logic (Simplified) ----
     else if (current_mode == MODE_1_STREAM) {
-        if (!stream_started && pb1_pressed_in_mode1) {
-            pb1_pressed_in_mode1 = 0;
-            stream_started = 1;
-            Disp2String("STREAMING_START\r\n");
-        }
-        
+        // Only executes ADC and stream if stream_started is 1
         if (stream_started) {
             adc_value = do_ADC();
             char buf[20];
-            sprintf(buf, "%u\r\n", adc_value);
+            sprintf(buf, "%u\r\n", adc_value); 
             Disp2String(buf);
-            delay_ms(100);
+            delay_ms(1000); 
         }
     }
 }
-
 // ========== MAIN ==========
 
 int main(void) {
+    
+   
     // --- System Initialization ---
     newClk(500); // 500 kHz clock
     
