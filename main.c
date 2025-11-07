@@ -1,3 +1,9 @@
+/*
+ * File:   main.c
+ * Author: Rinad Hamid, Simar Kandola, Abia Jahangir
+
+ */
+
 #include <xc.h>
 #include <p24F16KA101.h>
 #include <stdio.h>
