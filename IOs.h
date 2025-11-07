@@ -1,17 +1,24 @@
-// IOs.h
 #ifndef IOS_H
 #define IOS_H
 
 #include <xc.h>
 #include <stdint.h>
 
-// External variables defined in main.c
-extern uint16_t PB1_event, PB2_event, PB3_event;
+extern volatile uint8_t pb1_event;
+extern volatile uint8_t mode_changed;
+extern volatile uint8_t timer_flag;
+extern volatile uint16_t sleep_flag;
 
+// Enumerations for system modes
+typedef enum {
+    MODE_0_BARGRAPH = 0,
+    MODE_1_STREAM = 1
+} SystemState;
 
+extern volatile SystemState current_mode;
 
-// Function prototypes
+// ===== Function Prototypes =====
 void IOinit(void);
-void IOcheck(void);
+void IOCheck(void);
 
 #endif // IOS_H
