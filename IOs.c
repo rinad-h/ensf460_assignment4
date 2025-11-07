@@ -14,12 +14,6 @@ extern volatile uint8_t timer_flag;
 extern volatile uint8_t mode_changed;
 extern volatile uint16_t sleep_flag;
 
-typedef enum {
-    MODE_0_BARGRAPH = 0,
-    MODE_1_STREAM   = 1
-} SystemState;
-
-extern volatile SystemState current_mode;
 
 //Draws a live bar graph based on ADC value
 void display_bargraph(uint16_t adc_value) {
