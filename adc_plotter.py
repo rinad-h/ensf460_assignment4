@@ -1,3 +1,7 @@
+#File:   adc_plotter.py
+#Author: Rinad Hamid, Simar Kandola, Abia Jahangir
+
+
 import serial
 import time
 import matplotlib.pyplot as plt
