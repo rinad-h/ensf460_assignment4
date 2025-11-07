@@ -8,6 +8,9 @@
 #include <p24F16KA101.h>
 #include <stdint.h>
 #include "ADC.h"
+#include "TimeDelay.h"
+
+extern volatile uint16_t sleep_flag;
 
 // Initialize ADC module
 void init_ADC(void) {
@@ -41,10 +44,7 @@ void init_ADC(void) {
     AD1CON1bits.ADON = 1;
     
     // Wait for ADC to stabilize (small delay)
-    int i;
-    for(i = 0; i < 2000; i++) { // Simple delay loop
-        Nop();
-    }
+    delay_ms(500);
 }
 
 // Perform ADC conversion and return result
