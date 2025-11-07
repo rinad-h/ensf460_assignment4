@@ -9,6 +9,8 @@
 
 #include <stdint.h> // For uint16_t
 
+extern volatile uint16_t sleep_flag;
+
 #ifdef	__cplusplus
 extern "C" {
 #endif
