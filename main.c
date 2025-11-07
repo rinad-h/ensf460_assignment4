@@ -37,11 +37,6 @@
 #pragma config DSBOREN = ON
 #pragma config DSWDTEN = ON
 
-//Program states
-typedef enum {
-    MODE_0_BARGRAPH = 0,   // Display ADC as bargraph
-    MODE_1_STREAM = 1      // Stream ADC values over UART
-} SystemState;
 
 volatile SystemState current_mode = MODE_0_BARGRAPH;
 volatile uint8_t mode_changed = 0;
