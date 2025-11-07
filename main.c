@@ -1,10 +1,3 @@
-/*
- * File:   main.c
- * Author: Your Name
- * ADC Assignment - Mode 0 (Bar Graph) and Mode 1 (Data Streaming)
- * Created on: November 2025
- */
-
 #include <xc.h>
 #include <p24F16KA101.h>
 #include <stdio.h>
@@ -15,159 +8,110 @@
 #include "UART2.h"
 #include "TimeDelay.h"
 #include "ADC.h"
+#include "IOs.h"
 
-// ========== CONFIGURATION BITS ==========
-// FBS
 #pragma config BWRP = OFF
 #pragma config BSS = OFF
-// FGS
 #pragma config GWRP = OFF
 #pragma config GCP = OFF
-// FOSCSEL
 #pragma config FNOSC = FRC
 #pragma config IESO = OFF
-// FOSC
 #pragma config POSCMOD = NONE
 #pragma config OSCIOFNC = ON
 #pragma config POSCFREQ = HS
 #pragma config SOSCSEL = SOSCHP
 #pragma config FCKSM = CSECMD
-// FWDT
 #pragma config WDTPS = PS32768
 #pragma config FWPSA = PR128
 #pragma config WINDIS = OFF
 #pragma config FWDTEN = OFF
-// FPOR
 #pragma config BOREN = BOR3
 #pragma config PWRTEN = ON
 #pragma config I2C1SEL = PRI
 #pragma config BORV = V18
 #pragma config MCLRE = ON
-// FICD
 #pragma config ICS = PGx2
-// FDS
 #pragma config DSWDTPS = DSWDTPSF
 #pragma config DSWDTOSC = LPRC
 #pragma config RTCOSC = SOSC
 #pragma config DSBOREN = ON
 #pragma config DSWDTEN = ON
-// ========================================
 
-// ----- State definitions -----
+//Program states
 typedef enum {
-    MODE_0_BARGRAPH = 0,
-    MODE_1_STREAM = 1
+    MODE_0_BARGRAPH = 0,   // Display ADC as bargraph
+    MODE_1_STREAM = 1      // Stream ADC values over UART
 } SystemState;
 
-// ----- Global flags -----
 volatile SystemState current_mode = MODE_0_BARGRAPH;
-volatile uint8_t mode_changed = 0;  // Flag to indicate mode switch
-volatile uint8_t pb1_event = 0;     // Flag for PB1 press (from CN ISR)
-volatile uint8_t timer_flag = 0;  // Flag for 1Hz Timer (from Timer1 ISR)
-volatile uint16_t sleep_flag = 0; // Flag for delay_ms (from Timer2 ISR)
+volatile uint8_t mode_changed = 0;
+volatile uint8_t pb1_event = 0;
+volatile uint8_t timer_flag = 0;
+volatile uint16_t sleep_flag = 0;
 
-// ========== FUNCTION PROTOTYPES ==========
-void IOinit(void);
+// Function prototypes
 void setup_timer1(void);
-void display_bargraph(uint16_t adc_value);
 
-// ========== IMPLEMENTATIONS ==========
-
-// ---- 1 Hz Timer ----
+// Timer1 setup
 void setup_timer1(void) {
-    T1CONbits.TON = 0;        // Disable Timer
-    T1CONbits.TCS = 0;        // Select internal instruction cycle clock
-    T1CONbits.TCKPS = 0b01;   // 1:8 prescaler (500kHz / 8 = 62.5 kHz)
-    TMR1 = 0;                 // Clear timer register
-    PR1 = 62499;              // Load period value for 1s interrupt (62500 - 1)
-    IFS0bits.T1IF = 0;        // Clear Timer1 Interrupt Flag
-    IEC0bits.T1IE = 1;        // Enable Timer1 interrupt
-    T1CONbits.TON = 1;        // Start Timer
+    T1CONbits.TON = 0;       // Turn timer off while setting it up
+    T1CONbits.TCS = 0;       // Use internal clock
+    T1CONbits.TCKPS = 0b01;  // Prescaler = 8
+    TMR1 = 0;                // Clear timer count
+    PR1 = 62499;             // Period register for roughly 100ms interval
+    IFS0bits.T1IF = 0;       // Clear interrupt flag
+    IEC0bits.T1IE = 1;       // Enable timer interrupt
+    T1CONbits.TON = 1;       // Start timer
 }
-
-// ---- Display bar graph on one line ----
-void display_bargraph(uint16_t adc_value) {
-    char line[80];
-    const int BAR_WIDTH = 32; // Width of the bar graph
-    
-    // Scale 10-bit ADC value (0-1023) to bar width
-    int num_stars = (int)(((long)adc_value * BAR_WIDTH) / 1023); 
-    
-    // Clamp values to be safe
-    if (num_stars < 0) num_stars = 0;
-    if (num_stars > BAR_WIDTH) num_stars = BAR_WIDTH;
-
-    int pos = 0;
-    // \r returns to the start of the line without a new line
-    line[pos++] = '\r'; 
-
-    // Add prefix
-    const char *prefix = "Mode 0: ";
-    strcpy(&line[pos], prefix);
-    pos += strlen(prefix);
-
-    // Add stars
-    for (int i = 0; i < num_stars && pos < sizeof(line) - 1; i++) {
-        line[pos++] = '*';
-    }
-    // Add padding spaces
-    for (int i = num_stars; i < BAR_WIDTH && pos < sizeof(line) - 1; i++) {
-        line[pos++] = ' ';
-    }
-
-    // Add hex value, ensuring 3 digits (0x000 to 0x3FF)
-    pos += snprintf(&line[pos], sizeof(line) - pos, " 0x%03X", adc_value);
-    line[pos] = '\0'; // Null-terminate the string
-
-    Disp2String(line); // Send the full line to UART
-}
-
-// ========== MAIN ==========
 
 int main(void) {
-    
-   
-    // --- System Initialization ---
-    newClk(500); // 500 kHz clock
-    
-    // --- Analog setup (AN12/RB15) ---
-    AD1PCFG = 0xFFFF;
-    AD1PCFGbits.PCFG12 = 0;
-    
-    IOinit();
-    InitUART2();
-    init_ADC();
-    setup_timer1();
-   
+    newClk(500);              // Run system at 500 kHz
+    AD1PCFG = 0xFFFF;         // Set all pins to digital by default
+    AD1PCFGbits.PCFG12 = 0;   // Make pin 15 analog input (potentiometer)
+    IOinit();                 // Set up push buttons
+    InitUART2();              // Initialize UART for serial communication
+    init_ADC();               // Set up ADC
+    setup_timer1();           // Start Timer1
     delay_ms(10);
+
     Disp2String("\r\n*** MODE 0: Bar Graph Display ***\r\n");
 
+    // Main loop: constantly check for button press or ADC changes
     while (1) {
-        Idle();      // Sleep until interrupt wakes us
-        delay_ms(50);  // Handle debouncing if button pressed
-        IOCheck();   // Process all pending events
+        IOCheck();            // Handles LED bar display and mode switching
+        delay_ms(10);         // debounce
     }
 
     return 0;
 }
 
-// ========== INTERRUPT SERVICE ROUTINES ==========
-
-// Timer1 ISR (1 Hz)
+//Timer1 Interrupt
 void __attribute__((interrupt, no_auto_psv)) _T1Interrupt(void) {
-    IFS0bits.T1IF = 0; // Clear Timer1 interrupt flag
-    timer_flag = 1;    // Set 1Hz flag for main loop
+    IFS0bits.T1IF = 0;  // Clear interrupt flag
+    timer_flag = 1;     // Signal that timer expired
 }
 
-// Timer2 ISR (used by TimeDelay.c)
+//Timer2 Interrupt
 void __attribute__((interrupt, no_auto_psv)) _T2Interrupt(void) {
-    IFS0bits.T2IF = 0; // Clear Timer2 interrupt flag
-    T2CONbits.TON = 0; // Stop Timer2
-    sleep_flag = 1;    // Set flag for delay_ms
+    IFS0bits.T2IF = 0;
+    T2CONbits.TON = 0;  // Stop Timer2
+    sleep_flag = 1;     //Flag that sleep/delay period ended
 }
 
-// Change Notification ISR (PB1)
+//Detects button press and release on PB1
 void __attribute__((interrupt, no_auto_psv)) _CNInterrupt(void) {
-    IFS1bits.CNIF = 0; // Clear CN interrupt flag
-    pb1_event = 1;     // Set button press flag for main loop
+    static uint8_t button_was_pressed = 0;
+    uint8_t current_state = PORTBbits.RB7;  // Read push button state
+
+    // Check for release (button goes from low → high)
+    if (button_was_pressed == 1 && current_state == 1) {
+        pb1_event = 1;          // Button was released → event triggered
+        button_was_pressed = 0;
+    } 
+    // Check for press (button goes from high → low)
+    else if (current_state == 0) {
+        button_was_pressed = 1;
+    }
+
+    IFS1bits.CNIF = 0;          // Clear CN interrupt flag
 }
