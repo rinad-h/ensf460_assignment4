@@ -1,6 +1,6 @@
 /*
  * File:   ADC.c
- * Author: Your Name
+ * Author: Rinad Hamid, Simar Kandola, Abia Jahangir
  * ADC driver functions for PIC24F
  */
 
@@ -33,7 +33,6 @@ void init_ADC(void) {
                                 // Total conversion = (31+12)*TAD = 43*128us = ~5.5ms
     
     // AD1CHS register - Select input channel
-    // ************ THIS IS THE MAIN FIX ************
     AD1CHSbits.CH0NA = 0;       // MUXA negative input = VREFL (VSS)
     AD1CHSbits.CH0SA = 0b01100; // MUXA positive input = AN12 (pin 15, RB15)
                                 // 0b01100 is 12 decimal
