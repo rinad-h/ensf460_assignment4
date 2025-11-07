@@ -1,7 +1,7 @@
-/* * File:   ADC.h
- * Author: Your Name
- *
- * Created on November 2025
+/*
+ * File:   ADC.h
+ * Author: Rinad Hamid, Simar Kandola, Abia Jahangir
+ * ADC driver functions for PIC24F
  */
 
 #ifndef ADC_H
