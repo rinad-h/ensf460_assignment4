@@ -9,7 +9,6 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdint.h>
-
 #include "clkChange.h"
 #include "UART2.h"
 #include "TimeDelay.h"
@@ -43,76 +42,93 @@
 #pragma config DSBOREN = ON
 #pragma config DSWDTEN = ON
 
-
-volatile SystemState current_mode = MODE_0_BARGRAPH;
-volatile uint8_t mode_changed = 0;
+volatile uint8_t system_state = 0;  // 0 = OFF, 1 = ON
+volatile uint8_t active_led = 1;     // 1 = LED1, 2 = LED2
 volatile uint8_t pb1_event = 0;
+volatile uint8_t pb1_long_press = 0;
 volatile uint8_t timer_flag = 0;
 volatile uint16_t sleep_flag = 0;
 
-// Function prototypes
+extern void handle_pwm_interrupt(void);
 void setup_timer1(void);
 
-// Timer1 setup
 void setup_timer1(void) {
-    T1CONbits.TON = 0;       // Turn timer off while setting it up
-    T1CONbits.TCS = 0;       // Use internal clock
-    T1CONbits.TCKPS = 0b01;  // Prescaler = 8
-    TMR1 = 0;                // Clear timer count
-    PR1 = 62499;             // Period register for roughly 100ms interval
-    IFS0bits.T1IF = 0;       // Clear interrupt flag
-    IEC0bits.T1IE = 1;       // Enable timer interrupt
-    T1CONbits.TON = 1;       // Start timer
+    T1CONbits.TON = 0;
+    T1CONbits.TCS = 0;
+    T1CONbits.TCKPS = 0b01;  // 1:8 prescaler
+    TMR1 = 0;
+    PR1 = 62499;  // ~500ms interrupt at 500kHz clock
+    IFS0bits.T1IF = 0;
+    IEC0bits.T1IE = 1;
+    T1CONbits.TON = 1;
 }
 
 int main(void) {
-    newClk(500);              // Run system at 500 kHz
-    AD1PCFG = 0xFFFF;         // Set all pins to digital by default
-    AD1PCFGbits.PCFG12 = 0;   // Make pin 15 analog input (potentiometer)
-    IOinit();                 // Set up push buttons
-    InitUART2();              // Initialize UART for serial communication
-    init_ADC();               // Set up ADC
-    setup_timer1();           // Start Timer1
+    newClk(500);
+    
+    AD1PCFG = 0xFFFF;
+    AD1PCFGbits.PCFG12 = 0;  // Enable AN12 for ADC
+    
+    IOinit();
+    InitUART2();
+    init_ADC();
+    setup_timer1();
+    
     delay_ms(10);
-
-    Disp2String("\r\n*** MODE 0: Bar Graph Display ***\r\n");
-
-    // Main loop: constantly check for button press or ADC changes
+    
+    Disp2String("\r\n*** LED Control System ***\r\n");
+    Disp2String("Short press PB1: Toggle ON/OFF\r\n");
+    Disp2String("Long press PB1 (when ON): Swap LEDs\r\n");
+    Disp2String("*** SYSTEM OFF ***\r\n");
+    
     while (1) {
-        IOCheck();            // Handles LED bar display and mode switching
-        delay_ms(10);         // debounce
+        IOCheck();
+        delay_ms(10);
     }
-
+    
     return 0;
 }
 
-//Timer1 Interrupt
 void __attribute__((interrupt, no_auto_psv)) _T1Interrupt(void) {
-    IFS0bits.T1IF = 0;  // Clear interrupt flag
-    timer_flag = 1;     // Signal that timer expired
+    IFS0bits.T1IF = 0;
+    timer_flag = 1;
 }
 
-//Timer2 Interrupt
-void __attribute__((interrupt, no_auto_psv)) _T2Interrupt(void) {
-    IFS0bits.T2IF = 0;
-    T2CONbits.TON = 0;  // Stop Timer2
-    sleep_flag = 1;     //Flag that sleep/delay period ended
-}
-
-//Detects button press and release on PB1
 void __attribute__((interrupt, no_auto_psv)) _CNInterrupt(void) {
     static uint8_t button_was_pressed = 0;
-    uint8_t current_state = PORTBbits.RB7;  // Read push button state
-
-    // Check for release (button goes from low → high)
+    static uint16_t press_start_time = 0;
+    static uint16_t main_loop_counter = 0;
+    uint8_t current_state = PORTBbits.RB7;
+    
+    main_loop_counter++;  // Rough time counter (increments each CN event)
+    
     if (button_was_pressed == 1 && current_state == 1) {
-        pb1_event = 1;          // Button was released → event triggered
+        // Button released
+        uint16_t press_duration = main_loop_counter - press_start_time;
+        
+        if (press_duration > 200) {
+            pb1_long_press = 1;
+        } else {
+            pb1_event = 1;
+        }
+        
         button_was_pressed = 0;
-    } 
-    // Check for press (button goes from high → low)
-    else if (current_state == 0) {
+    } else if (current_state == 0) {
+        // Button pressed
         button_was_pressed = 1;
+        press_start_time = main_loop_counter;
     }
+    
+    IFS1bits.CNIF = 0;
+}
 
-    IFS1bits.CNIF = 0;          // Clear CN interrupt flag
+void __attribute__((interrupt, no_auto_psv)) _T2Interrupt(void) {
+    IFS0bits.T2IF = 0;
+    T2CONbits.TON = 0;
+    sleep_flag = 1;
+}
+
+void __attribute__((interrupt, no_auto_psv)) _T3Interrupt(void) {
+    IFS0bits.T3IF = 0;
+    handle_pwm_interrupt();  // Call PWM handler from IOs.c
 }
