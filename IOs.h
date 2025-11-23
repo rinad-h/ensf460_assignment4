@@ -10,23 +10,17 @@
 #include <xc.h>
 #include <stdint.h>
 
-// --- External global variables ---
+// --- External global variables from ios.c ---
 extern volatile uint8_t pb1_event;
+extern volatile uint8_t pb1_long_press;
 extern volatile uint8_t timer_flag;
-extern volatile uint8_t mode_changed;
-extern volatile uint16_t sleep_flag;
-
-// --- System mode enumeration ---
-typedef enum {
-    MODE_0_BARGRAPH = 0,
-    MODE_1_STREAM = 1
-} SystemState;
-
-extern volatile SystemState current_mode;
+extern volatile uint8_t system_state;    // 0 = OFF, 1 = ON
+extern volatile uint8_t active_led;      // 1 = LED1, 2 = LED2
 
 // --- Function prototypes ---
 void IOinit(void);
 void IOCheck(void);
-void display_bargraph(uint16_t adc_value);
+void set_led_intensity(uint16_t adc_value);
+void handle_pwm_interrupt(void);
 
-#endif // IOS_H
+#endif  // IOS_H
