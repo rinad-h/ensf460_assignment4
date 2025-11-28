@@ -17,15 +17,23 @@ extern volatile uint8_t timer_flag;
 extern volatile uint8_t system_state;  // 0 = OFF, 1 = ON
 extern volatile uint8_t active_led;    // 1 = LED1, 2 = LED2
 
+// Add PB2 event flag
+extern volatile uint8_t pb2_event;
+
 // Software PWM variables
 volatile uint16_t pwm_duty_cycle = 0;  // 0-PWM_PERIOD
 volatile uint16_t pwm_counter = 0;
 
-#define PWM_PERIOD 50  // 50 timer interrupts = 1 PWM cycle (~80Hz PWM at 4kHz timer)
+#define PWM_PERIOD 60  // 50 timer interrupts = 1 PWM cycle (~80Hz PWM at 4kHz timer)
 
-// Long press detection in main loop
+// Long press detection for PB1 in main loop
 uint16_t button_hold_counter = 0;
 uint8_t button_was_held = 0;
+
+// Blinking state variables
+volatile uint8_t blink_mode = 0;  // 0 = no blink, 1 = blinking
+volatile uint16_t blink_counter = 0;  // Counts timer interrupts for blink timing
+volatile uint8_t blink_state = 0;  // 0 = LED off phase, 1 = LED on phase
 
 void IOinit(void) {
     // Configure LED1 and LED2 as outputs
@@ -38,6 +46,11 @@ void IOinit(void) {
     TRISBbits.TRISB7 = 1;
     CNPU2bits.CN23PUE = 1;
     CNEN2bits.CN23IE = 1;
+    
+    // Configure PB2 (RB4) as input with pull-up
+    TRISBbits.TRISB4 = 1;
+    CNPU1bits.CN1PUE = 1;
+    CNEN1bits.CN1IE = 1;
     
     // Read port to clear mismatch
     (void)PORTB;
@@ -69,7 +82,7 @@ void IOCheck(void) {
     uint16_t adc_value;
     uint8_t button_state = PORTBbits.RB7;
     
-    // Monitor button hold time (polled every 10ms)
+    // Monitor button hold time for PB1 (polled every 10ms)
     if (button_state == 0) {  // Button is pressed (active low)
         button_hold_counter++;
         button_was_held = 1;
@@ -89,7 +102,39 @@ void IOCheck(void) {
         }
     }
     
-    // Handle long press event
+    // Handle PB2 event - toggle blink mode
+    if (pb2_event) {
+        pb2_event = 0;
+        
+        // Toggle blink mode
+        if (blink_mode == 0) {
+            // Start blinking
+            blink_mode = 1;
+            blink_counter = 0;
+            blink_state = 1;  // Start with LED on
+            
+            if (system_state == 0) {
+                Disp2String("\r\n*** Blinking at 100% intensity ***\r\n");
+            } else {
+                Disp2String("\r\n*** Blinking at current intensity ***\r\n");
+            }
+        } else {
+            // Stop blinking
+            blink_mode = 0;
+            blink_counter = 0;
+            blink_state = 0;
+            
+            // Turn off LEDs if system is OFF
+            if (system_state == 0) {
+                LED1 = 0;
+                LED2 = 0;
+            }
+            
+            Disp2String("\r\n*** Blinking stopped ***\r\n");
+        }
+    }
+    
+    // Handle long press event for PB1
     if (pb1_long_press) {
         pb1_long_press = 0;
         
@@ -108,7 +153,7 @@ void IOCheck(void) {
         pb1_event = 0;
     }
     
-    // Handle button press event (short press)
+    // Handle button press event for PB1 (short press)
     if (pb1_event) {
         pb1_event = 0;
         
@@ -124,6 +169,7 @@ void IOCheck(void) {
                 LED1 = 0;  // Turn off both LEDs
                 LED2 = 0;
                 pwm_duty_cycle = 0;  // Reset PWM
+                blink_mode = 0;  // Stop blinking when turning off
                 Disp2String("\r\n*** SYSTEM OFF ***\r\n");
             }
         }
@@ -146,10 +192,31 @@ void IOCheck(void) {
 
 // Software PWM interrupt handler (called by Timer3)
 void handle_pwm_interrupt(void) {
+    // Handle blinking timing (500ms on, 500ms off)
+    // At ~4kHz timer rate, 2000 interrupts = 500ms
+    if (blink_mode) {
+        blink_counter++;
+        if (blink_counter >= 2000) {  // 500ms elapsed
+            blink_counter = 0;
+            blink_state = !blink_state;  // Toggle between on and off
+        }
+    }
+    
+    // Determine if LED should be on based on blink state
+    uint8_t led_should_be_on = 1;
+    
+    if (blink_mode) {
+        if (blink_state == 0) {
+            // Blink OFF phase - LED should be off
+            led_should_be_on = 0;
+        }
+        // If blink_state == 1, LED should be on (will go through PWM logic below)
+    }
+    
     if (system_state == 1) {
-        // Compare counter with duty cycle to control active LED
-        if (pwm_counter < pwm_duty_cycle) {
-            // LED ON
+        // System ON - use current PWM duty cycle
+        if (led_should_be_on && pwm_counter < pwm_duty_cycle) {
+            // LED ON at current intensity
             if (active_led == 1) {
                 LED1 = 1;
                 LED2 = 0;
@@ -172,8 +239,21 @@ void handle_pwm_interrupt(void) {
             pwm_counter = 0;
         }
     } else {
-        LED1 = 0;  // Ensure both LEDs are off when system is off
-        LED2 = 0;
+        // System OFF - only blink at 100% if in blink mode
+        if (blink_mode && blink_state == 1) {
+            // Blink ON phase at 100% intensity
+            if (active_led == 1) {
+                LED1 = 1;
+                LED2 = 0;
+            } else {
+                LED1 = 0;
+                LED2 = 1;
+            }
+        } else {
+            // Turn off LEDs
+            LED1 = 0;
+            LED2 = 0;
+        }
         pwm_counter = 0;
     }
 }
