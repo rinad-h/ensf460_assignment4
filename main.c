@@ -1,9 +1,3 @@
-/*
- * File:   main.c
- * Author: Rinad Hamid, Simar Kandola, Abia Jahangir
-
- */
-
 #include <xc.h>
 #include <p24F16KA101.h>
 #include <stdio.h>
@@ -46,10 +40,12 @@ volatile uint8_t system_state = 0;  // 0 = OFF, 1 = ON
 volatile uint8_t active_led = 1;     // 1 = LED1, 2 = LED2
 volatile uint8_t pb1_event = 0;
 volatile uint8_t pb1_long_press = 0;
+volatile uint8_t pb2_event = 0;      // PB2 event flag
 volatile uint8_t timer_flag = 0;
 volatile uint16_t sleep_flag = 0;
 
 extern void handle_pwm_interrupt(void);
+
 void setup_timer1(void);
 
 void setup_timer1(void) {
@@ -77,8 +73,11 @@ int main(void) {
     delay_ms(10);
     
     Disp2String("\r\n*** LED Control System ***\r\n");
-    Disp2String("Short press PB1: Toggle ON/OFF\r\n");
-    Disp2String("Long press PB1 (when ON): Swap LEDs\r\n");
+    Disp2String("PB1 Short press: Toggle ON/OFF\r\n");
+    Disp2String("PB1 Long press (when ON): Swap LEDs\r\n");
+    Disp2String("PB2: Toggle LED blinking\r\n");
+    Disp2String("  - ON mode: Blink at current intensity\r\n");
+    Disp2String("  - OFF mode: Blink at 100% intensity\r\n");
     Disp2String("*** SYSTEM OFF ***\r\n");
     
     while (1) {
@@ -95,16 +94,20 @@ void __attribute__((interrupt, no_auto_psv)) _T1Interrupt(void) {
 }
 
 void __attribute__((interrupt, no_auto_psv)) _CNInterrupt(void) {
-    static uint8_t button_was_pressed = 0;
-    static uint16_t press_start_time = 0;
+    static uint8_t pb1_was_pressed = 0;
+    static uint16_t pb1_press_start_time = 0;
+    static uint8_t pb2_was_pressed = 0;
     static uint16_t main_loop_counter = 0;
-    uint8_t current_state = PORTBbits.RB7;
+    
+    uint8_t pb1_current_state = PORTBbits.RB7;
+    uint8_t pb2_current_state = PORTBbits.RB4;
     
     main_loop_counter++;  // Rough time counter (increments each CN event)
     
-    if (button_was_pressed == 1 && current_state == 1) {
-        // Button released
-        uint16_t press_duration = main_loop_counter - press_start_time;
+    // Handle PB1 (existing logic)
+    if (pb1_was_pressed == 1 && pb1_current_state == 1) {
+        // PB1 released
+        uint16_t press_duration = main_loop_counter - pb1_press_start_time;
         
         if (press_duration > 200) {
             pb1_long_press = 1;
@@ -112,11 +115,21 @@ void __attribute__((interrupt, no_auto_psv)) _CNInterrupt(void) {
             pb1_event = 1;
         }
         
-        button_was_pressed = 0;
-    } else if (current_state == 0) {
-        // Button pressed
-        button_was_pressed = 1;
-        press_start_time = main_loop_counter;
+        pb1_was_pressed = 0;
+    } else if (pb1_current_state == 0) {
+        // PB1 pressed
+        pb1_was_pressed = 1;
+        pb1_press_start_time = main_loop_counter;
+    }
+    
+    // Handle PB2 (simple press/release detection)
+    if (pb2_was_pressed == 1 && pb2_current_state == 1) {
+        // PB2 released - trigger event
+        pb2_event = 1;
+        pb2_was_pressed = 0;
+    } else if (pb2_current_state == 0) {
+        // PB2 pressed
+        pb2_was_pressed = 1;
     }
     
     IFS1bits.CNIF = 0;
