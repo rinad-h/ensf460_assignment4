@@ -9,27 +9,35 @@
 #include "IOs.h"
 
 // -----------------------------------------------------------------------------
-// MACROS (Must match main.c)
+// MACROS
 // -----------------------------------------------------------------------------
 #define LED1 LATBbits.LATB9
 #define LED2 LATAbits.LATA6
-#define PWM_PERIOD 60 
+#define PWM_PERIOD 60
+#define LONG_PRESS_THRESHOLD 150
 
 // -----------------------------------------------------------------------------
-// EXTERNAL VARIABLES (Defined in main.c)
+// EXTERNAL VARIABLES
 // -----------------------------------------------------------------------------
 extern volatile uint8_t system_state;
 extern volatile uint8_t active_led;
 extern volatile uint8_t uart_transmit_mode;
 extern volatile uint32_t millisecond_counter;
 extern volatile uint8_t timer_flag;
-
-// PWM & Blink variables (Defined in main.c)
 extern volatile uint16_t pwm_duty_cycle;
 extern volatile uint8_t blink_mode;
 extern volatile uint16_t blink_counter;
 extern volatile uint8_t blink_state;
 extern volatile uint16_t current_adc_value;
+
+// -----------------------------------------------------------------------------
+// STATIC VARIABLES FOR BUTTON HANDLING
+// -----------------------------------------------------------------------------
+static uint16_t pb1_hold_timer = 0;
+static uint8_t pb1_prev = 1;
+static uint8_t pb2_prev = 1;
+static uint8_t pb3_prev = 1;
+static uint8_t long_press_handled = 0;
 
 // -----------------------------------------------------------------------------
 // HELPER FUNCTIONS
@@ -102,95 +110,151 @@ void IOinit(void) {
 }
 
 // -----------------------------------------------------------------------------
-// IO CHECK (POLLING LOGIC)
+// STATE MACHINE EVENT HANDLERS (Priority Order)
 // -----------------------------------------------------------------------------
-void IOCheck(void) {
-    static uint16_t pb1_hold_timer = 0;
-    static uint8_t pb1_prev = 1;
-    static uint8_t pb2_prev = 1;
-    static uint8_t pb3_prev = 1;
-    static uint8_t long_press_handled = 0;
-    
-    uint16_t adc_value;
-    char buf[80];
 
-    // Read Inputs (Active Low)
+// Handle PB1: Short press = ON/OFF toggle, Long press = LED swap
+static uint8_t handle_pb1_events(void) {
     uint8_t pb1 = PORTBbits.RB7;
-    uint8_t pb2 = PORTBbits.RB4;
-    uint8_t pb3 = PORTAbits.RA4;
-
-    // --- PB1 LOGIC (Short = On/Off, Long = Swap LED) ---
+    uint8_t action_taken = 0;
+    
     if (pb1 == 0) { // Pressed
         pb1_hold_timer++;
-        if (pb1_hold_timer > 150 && !long_press_handled && system_state == 1) {
-            // Long Press Detected
+        if (pb1_hold_timer > LONG_PRESS_THRESHOLD && !long_press_handled && system_state == 1) {
+            // LONG PRESS: Swap Active LED
             long_press_handled = 1;
-            // Swap LEDs
-            if (active_led == 1) { active_led = 2; LED1 = 0; }
-            else { active_led = 1; LED2 = 0; }
+            if (active_led == 1) { 
+                active_led = 2; 
+                LED1 = 0; 
+            } else { 
+                active_led = 1; 
+                LED2 = 0; 
+            }
             update_status_line();
+            action_taken = 1;
         }
     } else { // Released
         if (pb1_prev == 0) { // Falling edge (release)
             if (!long_press_handled && pb1_hold_timer > 2) { 
-                // Short Press Action
+                // SHORT PRESS: Toggle System ON/OFF
                 if (system_state == 0) {
-                    system_state = 1; active_led = 1;
+                    // OFF → ON_LED1
+                    system_state = 1; 
+                    active_led = 1;
                 } else {
-                    system_state = 0; LED1 = 0; LED2 = 0;
-                    pwm_duty_cycle = 0; uart_transmit_mode = 0;
+                    // ON → OFF
+                    system_state = 0; 
+                    LED1 = 0; 
+                    LED2 = 0;
+                    pwm_duty_cycle = 0; 
+                    uart_transmit_mode = 0;
                 }
                 update_status_line();
+                action_taken = 1;
             }
         }
         pb1_hold_timer = 0;
         long_press_handled = 0;
     }
     pb1_prev = pb1;
+    
+    return action_taken;
+}
 
-    // --- PB2 LOGIC (Toggle Blink) ---
-    if (pb2 == 0 && pb2_prev == 1) {
+// Handle PB2: Toggle Blink Mode
+static uint8_t handle_pb2_events(void) {
+    uint8_t pb2 = PORTBbits.RB4;
+    uint8_t action_taken = 0;
+    
+    if (pb2 == 0 && pb2_prev == 1) { // Button pressed (edge detection)
+        // Toggle blink mode
         blink_mode = !blink_mode;
         blink_counter = 0;
-        blink_state = blink_mode; // Start ON
+        blink_state = blink_mode; // Start ON if entering blink
         update_status_line();
-        if (system_state == 0 && !blink_mode) { LED1 = 0; LED2 = 0; }
+        
+        // If turning off blink in OFF mode, ensure LEDs are off
+        if (system_state == 0 && !blink_mode) { 
+            LED1 = 0; 
+            LED2 = 0; 
+        }
+        action_taken = 1;
     }
     pb2_prev = pb2;
+    
+    return action_taken;
+}
 
-    // --- PB3 LOGIC (Toggle UART) ---
-    if (pb3 == 0 && pb3_prev == 1 && system_state == 1) {
+// Handle PB3: Toggle UART Transmission (only in ON mode)
+static uint8_t handle_pb3_events(void) {
+    uint8_t pb3 = PORTAbits.RA4;
+    uint8_t action_taken = 0;
+    
+    if (pb3 == 0 && pb3_prev == 1 && system_state == 1) { // Button pressed in ON mode
         if (uart_transmit_mode == 0) {
+            // Start UART transmission
             uart_transmit_mode = 1;
             millisecond_counter = 0;
             Disp2String("\r\nSTART_DATA\r\n");
         } else {
+            // Stop UART transmission
             uart_transmit_mode = 0;
             Disp2String("\r\nSTOP_DATA\r\n");
         }
         update_status_line();
+        action_taken = 1;
     }
     pb3_prev = pb3;
+    
+    return action_taken;
+}
 
-    // --- ADC & Status Update ---
+// Handle ADC reading and LED intensity update (only in ON mode)
+static uint8_t handle_adc_update(void) {
     if (system_state == 1 && timer_flag) {
         timer_flag = 0;
-        adc_value = do_ADC();
+        uint16_t adc_value = do_ADC();
         current_adc_value = adc_value;
         set_led_intensity(adc_value);
-        if (!uart_transmit_mode) update_status_line();
+        
+        // Only update status if not transmitting UART
+        if (!uart_transmit_mode) {
+            update_status_line();
+        }
+        return 1;
     }
+    return 0;
+}
 
-    // --- UART Transmission ---
+// Handle UART data transmission
+static uint8_t handle_uart_transmission(void) {
     if (uart_transmit_mode && system_state == 1) {
+        char buf[80];
         uint8_t intensity = get_current_intensity_percent();
+        
         sprintf(buf, "\r\n%lu,%u,%u", millisecond_counter, current_adc_value, intensity);
         Disp2String(buf);
         
+        // Check if 60 seconds elapsed
         if (millisecond_counter >= 60000) {
             uart_transmit_mode = 0;
             Disp2String("\r\nSTOP_DATA\r\n");
             update_status_line();
         }
+        return 1;
     }
+    return 0;
+}
+
+// -----------------------------------------------------------------------------
+// MAIN IO CHECK (State Machine Dispatcher)
+// -----------------------------------------------------------------------------
+void IOCheck(void) {
+    // Process events in priority order
+    // Note: All handlers can execute, they don't necessarily return on first action
+    handle_pb1_events();
+    handle_pb2_events();
+    handle_pb3_events();
+    handle_adc_update();
+    handle_uart_transmission();
 }
