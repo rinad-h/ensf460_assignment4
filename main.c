@@ -99,6 +99,7 @@ int main(void) {
     while (1) {
         IOCheck();    
         delay_ms(5); 
+        Idle();
                       
     }
     return 0;
