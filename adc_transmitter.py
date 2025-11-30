@@ -35,9 +35,8 @@ def main():
                 if "START_DATA" in line:
                     data_collection_started = True
                     print("\n=== Data collection started ===\n")
-                    start_time = time.time()
         
-        # Collect data for 60 seconds or until STOP_DATA received
+        # Collect data until STOP_DATA received (microcontroller handles 60s timing)
         while True:
             if ser.in_waiting > 0:
                 line = ser.readline().decode('utf-8', errors='ignore').strip()
@@ -75,12 +74,6 @@ def main():
                 except (ValueError, IndexError) as e:
                     print(f"Error parsing line: {line} - {e}")
                     continue
-            
-            # Check if 60 seconds have elapsed
-            elapsed_time = time.time() - start_time
-            if elapsed_time >= 60:
-                print("\n=== 60 seconds elapsed ===")
-                break
         
         # Close serial connection
         ser.close()
@@ -92,6 +85,7 @@ def main():
             return
         
         print(f"\nTotal data points collected: {len(timestamps)}")
+        print(f"Time range: {timestamps[0]:.3f}s to {timestamps[-1]:.3f}s")
         
         # Save data to CSV
         print(f"\nSaving data to {CSV_FILENAME}...")
@@ -117,6 +111,7 @@ def main():
         ax1.set_title('LED Intensity Level vs Time', fontsize=14, fontweight='bold')
         ax1.grid(True, alpha=0.3)
         ax1.set_ylim(-5, 105)
+        ax1.set_xlim(0, 60)  # Set x-axis to full 60 seconds
         
         # Plot 2: ADC Reading vs Time
         ax2.plot(timestamps, adc_readings, 'r-', linewidth=1.5)
@@ -125,6 +120,7 @@ def main():
         ax2.set_title('ADC Reading vs Time', fontsize=14, fontweight='bold')
         ax2.grid(True, alpha=0.3)
         ax2.set_ylim(-50, 1100)
+        ax2.set_xlim(0, 60)  # Set x-axis to full 60 seconds
         
         plt.tight_layout()
         
