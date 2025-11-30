@@ -97,10 +97,9 @@ int main(void) {
     Disp2String("\rSystem Ready: OFF MODE\r");
 
     while (1) {
-        IOCheck();    
-        delay_ms(5); 
         Idle();
-                      
+        delay_ms(5); 
+        IOCheck();                
     }
     return 0;
 }
