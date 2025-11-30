@@ -78,7 +78,7 @@ void setup_timer1(void) {
     T1CONbits.TCS = 0;
     T1CONbits.TCKPS = 0b01; // 1:8
     TMR1 = 0;
-    PR1 = 31240;
+    PR1 = 3124;
     IFS0bits.T1IF = 0;
     IEC0bits.T1IE = 1;
     T1CONbits.TON = 1;
@@ -173,7 +173,7 @@ void __attribute__((interrupt, no_auto_psv)) _T3Interrupt(void) {
 
     if (blink_mode) {
         blink_counter++;
-        if (blink_counter >= 2000) { // ~500ms
+        if (blink_counter >= 1024) { // ~500ms
             blink_counter = 0;
             blink_state = !blink_state;
         }
