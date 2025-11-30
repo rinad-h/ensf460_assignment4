@@ -9,7 +9,7 @@
 #include "ADC.h"
 #include "IOs.h"
 
-// Config bits (same as before)
+
 #pragma config BWRP = OFF
 #pragma config BSS = OFF
 #pragma config GWRP = OFF
@@ -37,9 +37,7 @@
 #pragma config DSBOREN = ON
 #pragma config DSWDTEN = ON
 
-// -----------------------------------------------------------------------------
-// GLOBAL VARIABLE DEFINITIONS (The 'Real' copies)
-// -----------------------------------------------------------------------------
+
 volatile uint8_t system_state = 0;
 volatile uint8_t active_led = 1;
 volatile uint8_t timer_flag = 0;
@@ -47,7 +45,6 @@ volatile uint16_t sleep_flag = 0;
 volatile uint8_t uart_transmit_mode = 0;
 volatile uint32_t millisecond_counter = 0;
 
-// PWM and Blink Variables
 volatile uint16_t pwm_duty_cycle = 0;
 volatile uint16_t pwm_counter = 0;
 volatile uint8_t current_led_state = 0;
@@ -56,72 +53,117 @@ volatile uint16_t blink_counter = 0;
 volatile uint8_t blink_state = 0;
 volatile uint16_t current_adc_value = 0;
 
-// Macros for ISR usage
-#define PWM_PERIOD 60
+
+volatile uint8_t pb1_is_pressed = 0;   
+volatile uint16_t pb1_duration_timer = 0; 
+volatile uint8_t pb1_release_event = 0; 
+
+volatile uint8_t pb2_is_pressed = 0;
+volatile uint8_t pb2_release_event = 0;
+
+volatile uint8_t pb3_is_pressed = 0;
+volatile uint8_t pb3_release_event = 0;
+
+volatile uint8_t cn_pb1_prev = 1; 
+volatile uint8_t cn_pb2_prev = 1;
+volatile uint8_t cn_pb3_prev = 1;
+
+#define PWM_PERIOD 45
 #define LED1 LATBbits.LATB9
 #define LED2 LATAbits.LATA6
 
-void setup_timer1(void);
 
 void setup_timer1(void) {
     T1CONbits.TON = 0;
     T1CONbits.TCS = 0;
     T1CONbits.TCKPS = 0b01; // 1:8
     TMR1 = 0;
-    PR1 = 62499;
+    PR1 = 31240;
     IFS0bits.T1IF = 0;
     IEC0bits.T1IE = 1;
     T1CONbits.TON = 1;
 }
 
 int main(void) {
-    newClk(500);
+    newClk(500); // 500kHz clock
     AD1PCFG = 0xFFFF;
-    AD1PCFGbits.PCFG12 = 0;
+    AD1PCFGbits.PCFG12 = 0; // AN12 for ADC
 
-    IOinit();
-    InitUART2();
-    init_ADC();
-    setup_timer1();
+    IOinit();       // Initialize GPIO and CN Interrupts
+    InitUART2();    // Initialize UART
+    init_ADC();     // Initialize ADC
+    setup_timer1(); // Initialize Timer 1
 
-    delay_ms(10);
-    Disp2String("OFF MODE                    \r");
+    Disp2String("\rSystem Ready: OFF MODE\r");
 
     while (1) {
-        IOCheck();
-        delay_ms(10);  
+        IOCheck();    
+        delay_ms(5); 
+                      
     }
     return 0;
 }
 
-// -----------------------------------------------------------------------------
-// INTERRUPTS
-// -----------------------------------------------------------------------------
-
+// Timer 1: ADC triggering flag
 void __attribute__((interrupt, no_auto_psv)) _T1Interrupt(void) {
     IFS0bits.T1IF = 0;
     timer_flag = 1;
 }
 
-// Minimal CN Interrupt - Logic moved to IOCheck()
-void __attribute__((interrupt, no_auto_psv)) _CNInterrupt(void) {
-    // Read ports to clear mismatch
-    volatile uint8_t dummyB = PORTB;
-    volatile uint8_t dummyA = PORTA;
-    IFS1bits.CNIF = 0;
-}
-
+// Timer 2: Sleep flag for delay_ms
 void __attribute__((interrupt, no_auto_psv)) _T2Interrupt(void) {
     IFS0bits.T2IF = 0;
     T2CONbits.TON = 0;
     sleep_flag = 1;
 }
 
-// PWM Interrupt - Logic inline to avoid function calls
+void __attribute__((interrupt, no_auto_psv)) _CNInterrupt(void) {
+    IFS1bits.CNIF = 0;
+
+    //Read Ports immediately to handle mismatch and get current state
+    uint8_t cur_pb1 = PORTBbits.RB7;
+    uint8_t cur_pb2 = PORTBbits.RB4;
+    uint8_t cur_pb3 = PORTAbits.RA4;
+
+    if (cur_pb1 == 0 && cn_pb1_prev == 1) { 
+        pb1_is_pressed = 1;
+        pb1_duration_timer = 0; 
+    } 
+    else if (cur_pb1 == 1 && cn_pb1_prev == 0) { 
+        pb1_is_pressed = 0;
+        pb1_release_event = 1; 
+    }
+    cn_pb1_prev = cur_pb1;
+
+    if (cur_pb2 == 0 && cn_pb2_prev == 1) {
+        pb2_is_pressed = 1;
+    } 
+    else if (cur_pb2 == 1 && cn_pb2_prev == 0) {
+        pb2_is_pressed = 0;
+        pb2_release_event = 1;
+    }
+    cn_pb2_prev = cur_pb2;
+
+    if (cur_pb3 == 0 && cn_pb3_prev == 1) {
+        pb3_is_pressed = 1;
+    } 
+    else if (cur_pb3 == 1 && cn_pb3_prev == 0) {
+        pb3_is_pressed = 0;
+        pb3_release_event = 1;
+    }
+    cn_pb3_prev = cur_pb3;
+}
+
+// Timer 3: PWM + Global Timebase + Button Timer
 void __attribute__((interrupt, no_auto_psv)) _T3Interrupt(void) {
     IFS0bits.T3IF = 0;
     
-    // 1. Millisecond Counting (4 ticks = 1ms approx)
+    
+    if (pb1_is_pressed) {
+        // Prevent overflow
+        if (pb1_duration_timer < 60000) pb1_duration_timer++;
+    }
+
     static uint8_t ms_scaler = 0;
     ms_scaler++;
     if (ms_scaler >= 4) {
@@ -129,7 +171,6 @@ void __attribute__((interrupt, no_auto_psv)) _T3Interrupt(void) {
         if (uart_transmit_mode) millisecond_counter++;
     }
 
-    // 2. Blink Logic
     if (blink_mode) {
         blink_counter++;
         if (blink_counter >= 2000) { // ~500ms
@@ -138,12 +179,10 @@ void __attribute__((interrupt, no_auto_psv)) _T3Interrupt(void) {
         }
     }
 
-    // 3. LED PWM Logic
     uint8_t led_on = 1;
-    if (blink_mode && !blink_state) led_on = 0; // Off phase of blink
+    if (blink_mode && !blink_state) led_on = 0; 
 
     if (system_state == 1) {
-        // ON Mode: PWM
         if (led_on && pwm_counter < pwm_duty_cycle) {
             if (active_led == 1) { LED1 = 1; LED2 = 0; } 
             else { LED1 = 0; LED2 = 1; }
@@ -156,7 +195,6 @@ void __attribute__((interrupt, no_auto_psv)) _T3Interrupt(void) {
         if (pwm_counter >= PWM_PERIOD) pwm_counter = 0;
         
     } else {
-        // OFF Mode: Blink only (100% brightness)
         if (blink_mode && blink_state) {
             if (active_led == 1) { LED1 = 1; LED2 = 0; }
             else { LED1 = 0; LED2 = 1; }
