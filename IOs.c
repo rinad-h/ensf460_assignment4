@@ -90,7 +90,8 @@ static void handle_adc_update(void) {
             current_adc_value = 0;
         }
         
-        if (!uart_transmit_mode || blink_mode) {
+        // CRITICAL: Never update status line during UART transmission
+        if (!uart_transmit_mode) {
              update_status_line();
         }
     }
@@ -112,7 +113,6 @@ static void handle_uart_transmission(void) {
         }
     }
 }
-
 void set_led_intensity(uint16_t adc_value) {
     pwm_duty_cycle = (uint16_t)((adc_value * (uint32_t)PWM_PERIOD) / 1023);
 }
