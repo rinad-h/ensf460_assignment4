@@ -173,7 +173,7 @@ void __attribute__((interrupt, no_auto_psv)) _T3Interrupt(void) {
 
     if (blink_mode) {
         blink_counter++;
-        if (blink_counter >= 1024) { // ~500ms
+        if (blink_counter >= 2033) { // ~500ms
             blink_counter = 0;
             blink_state = !blink_state;
         }
